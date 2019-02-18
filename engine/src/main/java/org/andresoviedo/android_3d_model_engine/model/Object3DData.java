@@ -1,5 +1,6 @@
 package org.andresoviedo.android_3d_model_engine.model;
 
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.Matrix;
@@ -32,7 +33,9 @@ public class Object3DData {
 
 	// opengl version to use to draw this object
 	private int version = 5;
-	/**
+    public static final float PI = 3.14159265358979323846f;
+
+    /**
 	 * The directory where the files reside so we can build referenced files in the model like material and textures
 	 * files
 	 */
@@ -44,19 +47,22 @@ public class Object3DData {
 	// private String assetsDir;
 	private String id;
 	private boolean drawUsingArrays = false;
-	private boolean flipTextCoords = true;
+    private boolean flipTextCoords = true;
+    private boolean mClickable = true;
 
 	// Model data for the simplest object
 
 	private boolean isVisible = true;
 
-	private float[] color;
+	private float[] color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	/**
 	 * The minimum thing we can draw in space is a vertex (or point).
 	 * This drawing mode uses the vertexBuffer
 	 */
 	private int drawMode = GLES20.GL_POINTS;
-	private int drawSize;
+	private int drawSize = 0;
+	private float lineWidth = -1.0f; // -1.0f ==> Leave unchanged
+	private float pointSize = -1.0f; // -1.0f ==> Leave unchanged
 
 	// Model data
 	private FloatBuffer vertexBuffer = null;
@@ -68,6 +74,7 @@ public class Object3DData {
 	private FaceMaterials faceMats;
 	private Materials materials;
 	private String textureFile;
+	private Object3D mDrawerObject = null;
 
 	// Processed arrays
 	private FloatBuffer vertexArrayBuffer = null;
@@ -75,19 +82,25 @@ public class Object3DData {
 	private FloatBuffer vertexNormalsArrayBuffer = null;
 	private FloatBuffer textureCoordsArrayBuffer = null;
 	private List<int[]> drawModeList = null;
-	private byte[] textureData = null;
+//    private byte[] textureData = null;
+    private Bitmap mBMTexture  = null;
+    private int mTextureID     = -1; // set after OpenGL created a Texture buffer.
 	private List<InputStream> textureStreams = null;
 
 	// derived data
 	private BoundingBox boundingBox;
 
 	// Transformation data
-	protected float[] position = new float[] { 0f, 0f, 0f };
-	protected float[] rotation = new float[] { 0f, 0f, 0f };
-	protected float[] scale = new float[] { 1, 1, 1 };
-	protected float[] modelMatrix = new float[16];
+	protected float[] globalPosition = new float[] { 0f, 0f, 0f };
+	protected float[] localPosition  = new float[] { 0f, 0f, 0f };
+	protected float[] rotation       = new float[] { 0f, 0f, 0f };
+	protected float[] scale          = new float[] { 1f, 1f, 1f };
+	protected float[] modelMatrix    = new float[16];
+    private   float[] dummyMatrix    = new float[16]; // required to properly rotate
+    private   float[] tempMatrix     = new float[16]; // required to properly rotate
 
-	{
+
+    {
 		Matrix.setIdentityM(modelMatrix,0);
 	}
 
@@ -115,19 +128,19 @@ public class Object3DData {
 		this.version = 2;
 	}
 
-	public Object3DData(FloatBuffer vertexArrayBuffer, FloatBuffer textureCoordsArrayBuffer, byte[] texData) {
+	public Object3DData(FloatBuffer vertexArrayBuffer, FloatBuffer textureCoordsArrayBuffer, Bitmap bm ) {
 		this.vertexArrayBuffer = vertexArrayBuffer;
 		this.textureCoordsArrayBuffer = textureCoordsArrayBuffer;
-		this.textureData = texData;
+		this.mBMTexture = bm;
 		this.version = 3;
 	}
 
 	public Object3DData(FloatBuffer vertexArrayBuffer, FloatBuffer vertexColorsArrayBuffer,
-			FloatBuffer textureCoordsArrayBuffer, byte[] texData) {
+			FloatBuffer textureCoordsArrayBuffer, Bitmap bm ) {
 		this.vertexArrayBuffer = vertexArrayBuffer;
 		this.vertexColorsArrayBuffer = vertexColorsArrayBuffer;
 		this.textureCoordsArrayBuffer = textureCoordsArrayBuffer;
-		this.textureData = texData;
+		this.mBMTexture = bm;
 		this.version = 4;
 	}
 
@@ -142,10 +155,16 @@ public class Object3DData {
 		this.materials = materials;
 	}
 
-	public void setLoader(WavefrontLoader loader) {
+	public void setLoader ( WavefrontLoader loader) {
 		this.loader = loader;
 	}
 
+	public void setDrawer ( Object3D obj )  {
+		mDrawerObject = obj;
+	}
+	public Object3D getDrawer ( )  {
+		return mDrawerObject;
+	}
 
 	public WavefrontLoader getLoader() {
 		return loader;
@@ -163,15 +182,43 @@ public class Object3DData {
 		this.octree = octree;
 	}
 
-	public Octree getOctree(){
+	public Octree getOctree ( ) {
 		return octree;
 	}
 
-	/**
-	 * Can be called when the faces were loaded asynchronously
-	 *
-	 * @param faces 3d faces
-	 */
+    public void setClickable ( boolean b )  {
+        mClickable = b;
+    }
+    public boolean getClickable ( )  {
+        return mClickable;
+    }
+	private List<Object3DData.OnClickListener> mClickCallbacks = null;
+    public interface OnClickListener {
+        void onClickListener ( Object3DData me, float[] pos );
+    }
+
+    public void setOnClickListener ( Object3DData.OnClickListener listener )  {
+        if ( mClickCallbacks == null )  {
+             mClickCallbacks = new ArrayList<OnClickListener> ( );
+        }
+        mClickCallbacks.add ( listener );
+    }
+
+    public void click ( float[] xyz )  {
+    	if ( mClickCallbacks == null )
+    		return;
+        // x, y, z
+        float[] pos = { 1.0f, 1.2f, 1.3f };
+        for ( Object3DData.OnClickListener listener : mClickCallbacks )  {
+            listener.onClickListener ( this, xyz ); //pos );
+        }
+    }
+
+    /**
+     * Can be called when the faces were loaded asynchronously
+     *
+     * @param faces 3d faces
+     */
 	public Object3DData setFaces(Faces faces) {
 		this.faces = faces;
 		this.drawOrderBuffer = faces.getIndexBuffer();
@@ -219,12 +266,20 @@ public class Object3DData {
 		return new float[] { 1 - getColor()[0], 1 - getColor()[1], 1 - getColor()[2], 1 };
 	}
 
-	public Object3DData setColor(float[] color) {
-		this.color = color;
-		return this;
-	}
+    public Object3DData setColor ( float r, float g, float b, float a ) {
+        this.color[0] = r;
+        this.color[1] = g;
+        this.color[2] = b;
+        this.color[3] = a;
+        return this;
+    }
 
-	public int getDrawMode() {
+    public Object3DData setColor(float[] color) {
+        this.color = color;
+        return this;
+    }
+
+    public int getDrawMode() {
 		return drawMode;
 	}
 
@@ -233,40 +288,96 @@ public class Object3DData {
 		return this;
 	}
 
-	public int getDrawSize() {
-		return drawSize;
+    public int getDrawSize() {
+        return drawSize;
+    }
+
+	public void setLineWidth ( float w )  {
+		lineWidth = w;
 	}
 
-	// -----------
-
-	public byte[] getTextureData() {
-		return textureData;
+	public float getLineWidth ( )  {
+		return lineWidth;
 	}
 
-	public void setTextureData(byte[] textureData) {
-		this.textureData = textureData;
+	public void setPointSize ( float ps )  {
+		pointSize = ps;
 	}
 
-	public Object3DData setPosition(float[] position) {
-		this.position = position;
-		updateModelMatrix();
+	public float getPointSize ( )  {
+		return pointSize;
+	}
+
+    // -----------
+
+    public void setTextureID ( int id )  {
+        mTextureID = id;
+    }
+    public int getTextureID ( )  {
+        return mTextureID;
+    }
+
+    public Bitmap getTexture ( )  {
+        return mBMTexture;
+    }
+
+	public void setTexture ( Bitmap bm ) {
+		this.mBMTexture = bm;
+	}
+
+	public Object3DData setGlobalPosition ( float x, float y, float z )  {
+		globalPosition[0] = x;
+		globalPosition[1] = y;
+		globalPosition[2] = z;
+		return this;
+	}
+
+	public float[] getGlobalPosition ( )  {
+		return globalPosition;
+	}
+
+	public float getGlobalPositionX ( )  {
+		return globalPosition[0];
+	}
+
+	public float getGlobalPositionY ( )  {
+		return globalPosition[1];
+	}
+
+	public float getGlobalPositionZ ( )  {
+		return globalPosition[2];
+	}
+
+	public Object3DData setPosition ( float x, float y, float z ) {
+		localPosition[0] = x;
+		localPosition[1] = y;
+		localPosition[2] = z;
+		updateModelMatrix ( );
+		return this;
+	}
+
+	public Object3DData setPosition ( float[] position )  {
+		if ( position == null )
+			return this;
+		localPosition = position;
+		updateModelMatrix ( );
 		return this;
 	}
 
 	public float[] getPosition() {
-		return position;
+		return localPosition;
 	}
 
 	public float getPositionX() {
-		return position != null ? position[0] : 0;
+		return localPosition != null ? localPosition[0] : 0;
 	}
 
 	public float getPositionY() {
-		return position != null ? position[1] : 0;
+		return localPosition != null ? localPosition[1] : 0;
 	}
 
 	public float getPositionZ() {
-		return position != null ? position[2] : 0;
+		return localPosition != null ? localPosition[2] : 0;
 	}
 
 	public float[] getRotation() {
@@ -285,9 +396,16 @@ public class Object3DData {
 		return rotation[2];
 	}
 
-	public Object3DData setScale(float[] scale){
+    public void setScale ( float x, float y, float z )  {
+        scale[0] = x;
+        scale[1] = y;
+        scale[2] = z;
+        updateModelMatrix ( );
+    }
+
+    public Object3DData setScale ( float[] scale )  {
 		this.scale = scale;
-		updateModelMatrix();
+		updateModelMatrix ( );
 		return this;
 	}
 
@@ -307,25 +425,73 @@ public class Object3DData {
 		return getScale()[2];
 	}
 
-	public Object3DData setRotation(float[] rotation) {
-		this.rotation = rotation;
-		updateModelMatrix();
+	private float limitTo ( float f, float min, float max )  {
+	    while ( f > max )
+            f -= max;
+	    while ( f < min )
+            f += max;
+	    return f;
+    }
+
+	public Object3DData setRotation ( float x, float y, float z ) {
+        x = limitTo ( x, 0.0f, 360.0f );
+        y = limitTo ( y, 0.0f, 360.0f );
+        z = limitTo ( z, 0.0f, 360.0f );
+		this.rotation[0] = x;
+		this.rotation[1] = y;
+		this.rotation[2] = z;
+		updateModelMatrix ( );
 		return this;
 	}
 
-	public Object3DData setRotationY(float rotY) {
-		this.rotation[1] = rotY;
-		updateModelMatrix();
+	public Object3DData setRotation ( float[] rotation )  {
+        this.rotation[0] = limitTo ( rotation[0], 0.0f, 360.0f );
+        this.rotation[1] = limitTo ( rotation[1], 0.0f, 360.0f );
+        this.rotation[2] = limitTo ( rotation[2], 0.0f, 360.0f );
+		updateModelMatrix ( );
 		return this;
 	}
 
-	private void updateModelMatrix(){
-		Matrix.setIdentityM(modelMatrix,0);
-		Matrix.setRotateM(modelMatrix,0,getRotationX(),1,0,0);
-		Matrix.setRotateM(modelMatrix,0,getRotationY(),0,1,0);
-		Matrix.setRotateM(modelMatrix,0,getRotationY(),0,0,1);
-		Matrix.scaleM(modelMatrix,0,getScaleX(),getScaleY(),getScaleZ());
-		Matrix.translateM(modelMatrix,0,getPositionX(),getPositionY(),getPositionZ());
+	public Object3DData setRotationX ( float rotX )  {
+		this.rotation[0] = limitTo ( rotX, 0.0f, 360.0f );
+		updateModelMatrix ( );
+		return this;
+	}
+
+	public Object3DData setRotationY ( float rotY )  {
+		this.rotation[1] = limitTo ( rotY, 0.0f, 360.0f );
+		updateModelMatrix ( );
+		return this;
+	}
+
+	public Object3DData setRotationZ ( float rotZ )  {
+		this.rotation[2] = limitTo ( rotZ, 0.0f, 360.0f );
+		updateModelMatrix ( );
+		return this;
+	}
+
+	private void updateModelMatrix ( )  {
+		Matrix.setIdentityM ( modelMatrix, 0 );
+		if ( rotation[0] != 0.0f )  {
+			Matrix.setIdentityM( dummyMatrix, 0 );
+			Matrix.setRotateM  ( dummyMatrix, 0, rotation[0],1f,0f,0f );
+            System.arraycopy   ( modelMatrix, 0, tempMatrix, 0, 16 );
+			Matrix.multiplyMM  ( modelMatrix, 0, tempMatrix, 0, dummyMatrix, 0 );
+		}
+		if ( rotation[1] != 0.0f )  {
+			Matrix.setIdentityM( dummyMatrix, 0 );
+			Matrix.setRotateM  ( dummyMatrix, 0, rotation[1],0f,1f,0f );
+            System.arraycopy   ( modelMatrix, 0, tempMatrix, 0, 16 );
+			Matrix.multiplyMM  ( modelMatrix, 0, tempMatrix, 0, dummyMatrix, 0 );
+		}
+		if ( rotation[2] != 0.0f )  {
+			Matrix.setIdentityM( dummyMatrix, 0 );
+			Matrix.setRotateM  ( dummyMatrix, 0, rotation[2],0f,0f,1f );
+            System.arraycopy   ( modelMatrix, 0, tempMatrix, 0, 16 );
+			Matrix.multiplyMM  ( modelMatrix, 0, tempMatrix, 0, dummyMatrix, 0 );
+		}
+		Matrix.scaleM     ( modelMatrix,0, getScaleX    ( ), getScaleY    ( ), getScaleZ    ( ) );
+		Matrix.translateM ( modelMatrix,0, getPositionX ( ), getPositionY ( ), getPositionZ ( ) );
 	}
 
 	public float[] getModelMatrix(){
@@ -685,7 +851,12 @@ public class Object3DData {
 		return bb;
 	}
 
-	public BoundingBox getBoundingBox() {
+	public BoundingBox recreateBoundingBox ( )  {
+		boundingBox = null;
+		return getBoundingBox ( );
+	}
+
+	public BoundingBox getBoundingBox ( )  {
 		FloatBuffer vertexBuffer = getVertexBuffer();
 		if (vertexBuffer == null){
 			vertexBuffer = getVertexArrayBuffer();

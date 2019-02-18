@@ -161,7 +161,7 @@ public class ModelRenderer implements GLSurfaceView.Renderer {
 
 			Object3DImpl lightBulbDrawer = (Object3DImpl) drawer.getPointDrawer();
 
-			float[] lightModelViewMatrix = lightBulbDrawer.getMvMatrix(lightBulbDrawer.getMMatrix(scene.getLightBulb()),modelViewMatrix);
+            float[] lightModelViewMatrix = lightBulbDrawer.getMvMatrix(scene.getLightBulb().getModelMatrix(),modelViewMatrix);
 
 			// Calculate position of the light in eye space to support lighting
 			Matrix.multiplyMV(lightPosInEyeSpace, 0, lightModelViewMatrix, 0, scene.getLightPosition(), 0);
@@ -185,14 +185,12 @@ public class ModelRenderer implements GLSurfaceView.Renderer {
 					infoLogged = true;
 				}
 
-				Integer textureId = textures.get(objData.getTextureData());
-				if (textureId == null && objData.getTextureData() != null) {
-					Log.i("ModelRenderer","Loading GL Texture...");
-					ByteArrayInputStream textureIs = new ByteArrayInputStream(objData.getTextureData());
-					textureId = GLUtil.loadTexture(textureIs);
-					textureIs.close();
-					textures.put(objData.getTextureData(), textureId);
-				}
+                Integer textureId = objData.getTextureID ( );
+                if ( textureId <= 0 && objData.getTexture ( ) != null )  {  // not yet converted
+                    Log.i("ModelRenderer", "Loading GL Texture...");
+                    textureId = GLUtil.loadTexture ( objData.getTexture ( ) );
+                    objData.setTextureID ( textureId );
+                }
 
 				if (objData.getDrawMode() == GLES20.GL_POINTS){
 					Object3DImpl lightBulbDrawer = (Object3DImpl) drawer.getPointDrawer();
@@ -282,7 +280,7 @@ public class ModelRenderer implements GLSurfaceView.Renderer {
 		return modelProjectionMatrix;
 	}
 
-	public float[] getModelViewMatrix() {
+	public float[]  getModelViewMatrix() {
 		return modelViewMatrix;
 	}
 }
